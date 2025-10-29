@@ -8,7 +8,7 @@ const firebaseConfig = {
   authDomain: "dot-war-a2296.firebaseapp.com",
   databaseURL: "https://dot-war-a2296-default-rtdb.europe-west1.firebasedatabase.app",
   projectId: "dot-war-a2296",
-  storageBucket: "dot-war-a2296.firbasestorage.app",
+  storageBucket: "dot-war-a2296.firebasestorage.app",
   messagingSenderId: "196979194257",
   appId: "1:196979194257:web:f93a04c5a4bfd528ac4230"
 };
@@ -26,11 +26,12 @@ let players = {};
 let keys = {};
 let lastAttack = 0;
 let angle = 0;
+let attackInProgress = false;
 
 // Aggiungi player al DB
 set(ref(db, "players/" + playerId), {
-  x: Math.random()*700+50,
-  y: Math.random()*500+50,
+  x: Math.random() * 700 + 50,
+  y: Math.random() * 500 + 50,
   angle: 0,
   attacking: false,
   life: 1,
@@ -51,92 +52,107 @@ onValue(playersRef, snapshot => {
 document.addEventListener("keydown", e => keys[e.code] = true);
 document.addEventListener("keyup", e => keys[e.code] = false);
 
-// ---------------- Movimento & Attacco ----------------
-function update() {
-  const player = players[playerId];
-  if (!player) return;
-
+// ---------------- Movimento ----------------
+function updateMovement(player) {
   const speed = 3;
   if (keys["KeyW"] || keys["ArrowUp"]) player.y -= speed;
   if (keys["KeyS"] || keys["ArrowDown"]) player.y += speed;
   if (keys["KeyA"] || keys["ArrowLeft"]) player.x -= speed;
   if (keys["KeyD"] || keys["ArrowRight"]) player.x += speed;
+}
 
-  angle = 0; // opzionale: puoi calcolare verso il mouse
+// ---------------- Attacco ----------------
+function triggerAttack(player) {
+  const now = Date.now();
+  if (attackInProgress || now - lastAttack < 500) return; // cooldown
 
-  // Attacco con cooldown 0.5s
-  if (keys["Space"]) {
-    const now = Date.now();
-    if (now - lastAttack >= 500) {
-      player.attacking = true;
-      lastAttack = now;
+  attackInProgress = true;
+  player.attacking = true;
+  lastAttack = now;
 
-      // Controllo colpi
-      for (let pid in players) {
-        if (pid === playerId) continue;
-        const enemy = players[pid];
-        const ax = player.x + Math.cos(angle)*20;
-        const ay = player.y + Math.sin(angle)*20;
-        const dx = ax - enemy.x;
-        const dy = ay - enemy.y;
-        const dist = Math.sqrt(dx*dx + dy*dy);
-        if (dist < 20 + 10) {
-          enemy.life -= 1/3;
-          if (enemy.life <= 0) {
-            player.points += 1;
-            enemy.life = 1;
-            player.life = 1;
-            if (player.points >= 3) {
-              alert("Hai vinto la partita!");
-              player.points = 0;
-              for (let p in players) players[p].points = 0;
-            }
+  // Collision check durante i 300ms di attacco
+  const attackDuration = 300;
+  const attackRadius = 30;
+
+  const attackInterval = setInterval(() => {
+    for (let pid in players) {
+      if (pid === playerId) continue;
+      const enemy = players[pid];
+      const dx = player.x - enemy.x;
+      const dy = player.y - enemy.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < attackRadius + 10) {
+        enemy.life -= 1 / 3;
+        if (enemy.life <= 0) {
+          player.points += 1;
+          enemy.life = 1;
+          player.life = 1;
+
+          if (player.points >= 3) {
+            alert("Hai vinto la partita!");
+            player.points = 0;
+            for (let p in players) players[p].points = 0;
           }
         }
       }
-
-      setTimeout(() => { player.attacking = false; }, 200);
     }
-    keys["Space"] = false;
+  }, 50);
+
+  setTimeout(() => {
+    clearInterval(attackInterval);
+    player.attacking = false;
+    attackInProgress = false;
+  }, attackDuration);
+}
+
+// ---------------- Update globale ----------------
+function update() {
+  const player = players[playerId];
+  if (!player) return;
+
+  updateMovement(player);
+
+  // Attacco singolo su pressione spazio
+  if (keys["Space"]) {
+    triggerAttack(player);
+    keys["Space"] = false; // evita attacchi multipli con stessa pressione
   }
 
-  // Aggiorna DB
+  // Aggiorna Firebase
   set(ref(db, "players/" + playerId), player);
 }
 
 // ---------------- Disegno ----------------
 function draw() {
-  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   for (let id in players) {
     const p = players[id];
 
     // Player
     ctx.beginPath();
-    ctx.arc(p.x, p.y, 10, 0, Math.PI*2);
-    ctx.fillStyle = (id === playerId) ? "lime" : "red";
+    ctx.arc(p.x, p.y, 10, 0, Math.PI * 2);
+    ctx.fillStyle = id === playerId ? "lime" : "red";
     ctx.fill();
 
-    // Attacco
+    // Attacco (cerchio giallo)
     if (p.attacking) {
-      const ax = p.x + Math.cos(p.angle)*20;
-      const ay = p.y + Math.sin(p.angle)*20;
       ctx.beginPath();
-      ctx.arc(ax, ay, 20, 0, Math.PI*2);
-      ctx.fillStyle = "rgba(255,255,0,0.4)";
+      ctx.arc(p.x, p.y, 30, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(255,255,0,0.3)";
       ctx.fill();
     }
 
     // Vita
     ctx.fillStyle = "white";
-    ctx.fillText("❤️".repeat(Math.ceil(p.life*3)), p.x-15, p.y-20);
+    ctx.fillText("❤️".repeat(Math.ceil(p.life * 3)), p.x - 15, p.y - 20);
 
     // Punti
-    ctx.fillText("⭐".repeat(p.points), p.x-15, p.y+25);
+    ctx.fillText("⭐".repeat(p.points), p.x - 15, p.y + 25);
   }
 }
 
-// ---------------- Game Loop ----------------
+// ---------------- Loop ----------------
 function gameLoop() {
   update();
   draw();
