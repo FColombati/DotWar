@@ -1,4 +1,3 @@
-// ---------------- Firebase Setup ----------------
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.4.0/firebase-app.js";
 import { getDatabase, ref, set, onValue, remove } from "https://www.gstatic.com/firebasejs/12.4.0/firebase-database.js";
 
@@ -8,7 +7,7 @@ const firebaseConfig = {
   authDomain: "dot-war-a2296.firebaseapp.com",
   databaseURL: "https://dot-war-a2296-default-rtdb.europe-west1.firebasedatabase.app",
   projectId: "dot-war-a2296",
-  storageBucket: "dot-war-a2296.firebasestorage.app",
+  storageBucket: "dot-war-a2296.firbasestorage.app",
   messagingSenderId: "196979194257",
   appId: "1:196979194257:web:f93a04c5a4bfd528ac4230"
 };
@@ -17,7 +16,6 @@ const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
 const playersRef = ref(db, "players");
 
-// ---------------- Canvas Setup ----------------
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
 
@@ -43,7 +41,7 @@ window.addEventListener("beforeunload", () => {
   remove(ref(db, "players/" + playerId));
 });
 
-// Ricevi aggiornamenti realtime
+// Aggiornamento realtime
 onValue(playersRef, snapshot => {
   players = snapshot.val() || {};
 });
@@ -70,11 +68,22 @@ function triggerAttack(player) {
   player.attacking = true;
   lastAttack = now;
 
-  // Collision check durante i 300ms di attacco
   const attackDuration = 300;
   const attackRadius = 30;
 
+  // Controllo collisione solo **una volta** durante l’attacco
+  const attackStartTime = Date.now();
+
   const attackInterval = setInterval(() => {
+    const elapsed = Date.now() - attackStartTime;
+    if (elapsed > attackDuration) {
+      clearInterval(attackInterval);
+      player.attacking = false;
+      attackInProgress = false;
+      set(ref(db, "players/" + playerId), player);
+      return;
+    }
+
     for (let pid in players) {
       if (pid === playerId) continue;
       const enemy = players[pid];
@@ -82,27 +91,25 @@ function triggerAttack(player) {
       const dy = player.y - enemy.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
       if (dist < attackRadius + 10) {
+        // Infliggi danno
         enemy.life -= 1 / 3;
+
+        // Se muore, assegna punto e reset solo vita del morto
         if (enemy.life <= 0) {
           player.points += 1;
-          enemy.life = 1;
-          player.life = 1;
-
+          enemy.life = 1; // reset solo del morto
+          // Controlla vittoria
           if (player.points >= 3) {
             alert("Hai vinto la partita!");
             player.points = 0;
             for (let p in players) players[p].points = 0;
           }
         }
+
+        set(ref(db, "players/" + pid), enemy);
       }
     }
   }, 50);
-
-  setTimeout(() => {
-    clearInterval(attackInterval);
-    player.attacking = false;
-    attackInProgress = false;
-  }, attackDuration);
 }
 
 // ---------------- Update globale ----------------
@@ -115,10 +122,10 @@ function update() {
   // Attacco singolo su pressione spazio
   if (keys["Space"]) {
     triggerAttack(player);
-    keys["Space"] = false; // evita attacchi multipli con stessa pressione
+    keys["Space"] = false;
   }
 
-  // Aggiorna Firebase
+  // Aggiorna DB
   set(ref(db, "players/" + playerId), player);
 }
 
@@ -135,7 +142,7 @@ function draw() {
     ctx.fillStyle = id === playerId ? "lime" : "red";
     ctx.fill();
 
-    // Attacco (cerchio giallo)
+    // Attacco
     if (p.attacking) {
       ctx.beginPath();
       ctx.arc(p.x, p.y, 30, 0, Math.PI * 2);
